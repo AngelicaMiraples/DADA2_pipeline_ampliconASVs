@@ -1,1 +1,213 @@
 # DADA2_pipeline_ampliconASVs
+
+---
+title: "20211028 DADA2 pipeline"
+author: "Ange"
+date: "28/10/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+# Original DADA2 tutorial: https://benjjneb.github.io/dada2/tutorial.html
+
+# call dada2; set your wd 
+```{r}
+library(dada2)
+
+setwd("C:/Users/amira/Documents/workingR/Assignment3/Sequences/Data3neg")
+path <- "C:/Users/amira/Documents/workingR/Assignment3/Sequences/Data3neg" # CHANGE ME to the directory containing the fastq files after unzipping.
+list.files(path)
+
+```
+# assignment3 sequences have 4 sequences, each has a Forward (R1) and Reverse(R2)
+# dataset names will vary depending on sequencing center
+# Optional:Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+
+# Optional:Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+
+```{r}
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+```
+
+
+# inspect read quality profiles of forward/_R1_ and reverse /_R2_
+# MANUAL STEP --check plots for quality scores
+```{r}
+plotQualityProfile(fnFs[1:2])
+plotQualityProfile(fnRs[1:2])
+```
+
+# Place filtered files in filtered/ subdirectory
+# filtering: specify truncation length for (for, rev)
+```{r}
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(250,230),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=FALSE) # On Windows set multithread=FALSE
+head(out)
+```
+# learning error rates
+```{r}
+errF <- learnErrors(filtFs, multithread=FALSE)
+
+errR <- learnErrors(filtRs, multithread=FALSE)
+
+plotErrors(errF, nominalQ=TRUE)
+```
+
+# sample inference -- for ASVs; looking to see how many of the F/R filtered 
+sequences are unique
+```{r}
+dadaFs <- dada(filtFs, err=errF, multithread=FALSE)
+dadaRs <- dada(filtRs, err=errR, multithread=FALSE)
+
+dadaFs[[1]]
+```
+
+# merging pair-ended reads
+```{r}
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers[[1]])
+```
+
+
+# construct sequence table
+# inspect distribution of sequence lengths
+```{r}
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+```
+
+# removing chimeras
+```{r}
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=FALSE, verbose=TRUE)
+dim(seqtab.nochim)
+
+sum(seqtab.nochim)/sum(seqtab)
+```
+
+# track reads through the pipeline; looking at the number of reads that progressed to each step
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+```{r}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+```
+
+# assign taxonomy using silva v138 train set
+```{r}
+taxa <- assignTaxonomy(seqtab.nochim, "C:/Users/amira/Documents/workingR/silva_nr99_v138.1_train_set.fa.gz", multithread=FALSE)
+```
+
+# look at the taxonomic assignments
+```{r}
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+```
+# transfering DADA2 data into phyloseq for further processing/visualization
+# call packages
+```{r}
+library(phyloseq)
+library(Biostrings)
+library(ggplot2)
+theme_set(theme_bw())
+```
+
+# construct a dataframe
+```{r}
+samples.out <- rownames(seqtab.nochim)
+subject <- sapply(strsplit(samples.out, "D"), `[`, 1)
+gender <- substr(subject,1,1)
+subject <- substr(subject,2,999)
+day <- as.integer(sapply(strsplit(samples.out, "D"), `[`, 2))
+samdf <- data.frame(Subject=subject, Gender=gender, Day=day)
+samdf$When <- "Early"
+samdf$When[samdf$Day>100] <- "Late"
+rownames(samdf) <- samples.out
+```
+
+# construct phyloseq dataframe
+```{r}
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+               sample_data(samdf), 
+               tax_table(taxa))
+ps <- prune_samples(sample_names(ps) != "Mock", ps) # Remove mock sample
+```
+
+# storing DNA sequences of ASVs as refseqs; rename taxa as a short string
+```{r}
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+ps <- merge_phyloseq(ps, dna)
+taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+ps
+```
+# check alpha diversity
+```{r}
+plot_richness(ps, x="Subject", measures=c("Shannon", "Simpson"))
+
+```
+
+# check ordinate -- Bray NMDS
+# transform data to proportions as appropriate for Bray-Curtis distances
+```{r}
+ps.prop <- transform_sample_counts(ps, function(otu) otu/sum(otu))
+ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+
+plot_ordination(ps.prop, ord.nmds.bray, color="When", title="Bray NMDS")
+```
+# barplot -- RA
+```{r}
+top20 <- names(sort(taxa_sums(ps), decreasing=TRUE))[1:20]
+ps.top20 <- transform_sample_counts(ps, function(OTU) OTU/sum(OTU))
+ps.top20 <- prune_taxa(top20, ps.top20)
+RAO <- plot_bar(ps.top20, x="Subject", fill="Order") #+ facet_wrap(~When, scales="free_x")
+
+RAO
+```
+# change labels, title and save as png
+```{r}
+opc <- RAO + labs(x = "Sample", y = "Relative Abundance", title = "Microbial order level profile from pumice rock (3) compared to negative control (neg)")
+opc
+ggsave("opc.png", width = 8, height = 4)
+```
+
+# view top 3 ASVs
+# otu table in phyloseq object (ps) indexing 2 samples and 3 taxa (ASVs)
+# not sure if will work with 3 samples + neg control instead of 1 sample + neg control
+```{r}
+otu_table(ps)[1:2, 1:3]
+
+seqtab.nochim[1:2, 1:3]
+
+```
+
+# bonus: ps.top convert into dataframe 
+```{r}
+library(metagMisc)
+ps.top20DF <- phyloseq_to_df(ps.top20)
+str(ps.top20DF)
+```
+
+# graph ps.topDF as geom_point with RA reflected in point size
+```{r}
+plot <- ggplot(ps.top20DF, aes(x= "Day 3", OTU)) + geom_point(aes(size = P3)) +
+  labs( x= "Sample", y = "ASV", size = "Relative Abundance", fill = "")
+plot
+
+ggsave("point.png", width = 3, height = 4)
+```
