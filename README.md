@@ -8,4 +8,4 @@ Core packages required: DADA2, ggplot2, phyloseq, Biostrings (see Rmd file)
 
 Useful links:
 Callahan et al., 2016 https://doi.org/10.1038/nmeth.3869 
-Dr. Benji Github page https://github.com/benjjneb/dada2
+Dr. Callahan Github page https://github.com/benjjneb/dada2
