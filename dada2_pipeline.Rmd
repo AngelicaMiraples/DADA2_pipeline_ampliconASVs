@@ -17,8 +17,7 @@ path <- "C:/Users/amira/Documents/workingR/Assignment3/Sequences/Data3neg" # CHA
 list.files(path)
 
 ```
-#assignment3 sequences have 4 sequences, each has a Forward (R1) and Reverse(R2)
-#dataset names will vary depending on sequencing center
+# dataset names will vary depending on sequencing center 
 # Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
 
 # Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
@@ -32,8 +31,8 @@ sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
 ```
 
 
-#inspect read quality profiles of forward/_R1_ and reverse /_R2_
-#MANUAL STEP --here-- for quality scores
+# inspect read quality profiles of forward/_R1_ and reverse /_R2_
+# MANUAL STEP --here-- for quality scores
 ```{r}
 plotQualityProfile(fnFs[1:2])
 plotQualityProfile(fnRs[1:2])
@@ -53,7 +52,7 @@ out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(250,230),
               compress=TRUE, multithread=FALSE) # On Windows set multithread=FALSE
 head(out)
 ```
-#learning error rates
+# learning error rates
 ```{r}
 errF <- learnErrors(filtFs, multithread=FALSE)
 
@@ -62,7 +61,7 @@ errR <- learnErrors(filtRs, multithread=FALSE)
 plotErrors(errF, nominalQ=TRUE)
 ```
 
-#sample inference -- for ASVs; looking to see how many of the F/R filtered 
+# sample inference -- for ASVs; looking to see how many of the F/R filtered 
 sequences are unique
 ```{r}
 dadaFs <- dada(filtFs, err=errF, multithread=FALSE)
@@ -71,7 +70,7 @@ dadaRs <- dada(filtRs, err=errR, multithread=FALSE)
 dadaFs[[1]]
 ```
 
-#merging pair-ended reads
+# merging pair-ended reads
 ```{r}
 mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
 # Inspect the merger data.frame from the first sample
@@ -79,7 +78,7 @@ head(mergers[[1]])
 ```
 
 
-#construct sequence table
+# construct sequence table
 ```{r}
 seqtab <- makeSequenceTable(mergers)
 dim(seqtab)
@@ -88,7 +87,7 @@ dim(seqtab)
 table(nchar(getSequences(seqtab)))
 ```
 
-#removing chimeras
+# removing chimeras
 ```{r}
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=FALSE, verbose=TRUE)
 dim(seqtab.nochim)
@@ -96,7 +95,7 @@ dim(seqtab.nochim)
 sum(seqtab.nochim)/sum(seqtab)
 ```
 
-#track reads through the pipeline; looking at the number of 
+# track reads through the pipeline; looking at the number of 
 reads that progressed to each step
 ```{r}
 getN <- function(x) sum(getUniques(x))
@@ -107,19 +106,19 @@ rownames(track) <- sample.names
 head(track)
 ```
 
-#assign taxonomy using silva v138 train set
+# assign taxonomy using silva v138 train set
 ```{r}
 taxa <- assignTaxonomy(seqtab.nochim, "C:/Users/amira/Documents/workingR/silva_nr99_v138.1_train_set.fa.gz", multithread=FALSE)
 ```
 
-#look at the taxonomic assignments
+# look at the taxonomic assignments
 ```{r}
 taxa.print <- taxa # Removing sequence rownames for display only
 rownames(taxa.print) <- NULL
 head(taxa.print)
 ```
-#transfering DADA2 data into phyloseq for further processing/visualization
-#call packages
+# transfering DADA2 data into phyloseq for further processing/visualization
+# call packages
 ```{r}
 library(phyloseq)
 library(Biostrings)
@@ -140,7 +139,7 @@ samdf$When[samdf$Day>100] <- "Late"
 rownames(samdf) <- samples.out
 ```
 
-#construct phyloseq dataframe
+# construct phyloseq dataframe
 ```{r}
 ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
                sample_data(samdf), 
@@ -148,7 +147,7 @@ ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE),
 ps <- prune_samples(sample_names(ps) != "Mock", ps) # Remove mock sample
 ```
 
-#storing DNA sequences of ASVs as refseqs; rename taxa as a short string
+# storing DNA sequences of ASVs as refseqs; rename taxa as a short string
 ```{r}
 dna <- Biostrings::DNAStringSet(taxa_names(ps))
 names(dna) <- taxa_names(ps)
